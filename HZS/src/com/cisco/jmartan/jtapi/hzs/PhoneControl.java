@@ -3,6 +3,7 @@ package com.cisco.jmartan.jtapi.hzs;
 import java.util.HashSet;
 
 import javax.telephony.Address;
+import javax.telephony.Call;
 import javax.telephony.CallObserver;
 import javax.telephony.Connection;
 import javax.telephony.InvalidArgumentException;
@@ -23,8 +24,10 @@ import javax.telephony.events.ProvShutdownEv;
 import javax.telephony.events.TermEv;
 
 import com.cisco.cti.util.Condition;
+import com.cisco.jtapi.extensions.CiscoCall;
 import com.cisco.jtapi.extensions.CiscoJtapiPeer;
 import com.cisco.jtapi.extensions.CiscoJtapiVersion;
+import com.cisco.jtapi.extensions.CiscoPartyInfo;
 import com.cisco.jtapi.extensions.CiscoProvider;
 import com.cisco.jtapi.extensions.CiscoProviderObserver;
 import com.cisco.jtapi.extensions.CiscoTerminal;
@@ -35,7 +38,8 @@ public class PhoneControl implements CiscoProviderObserver {
 	private CiscoProvider provider;
 
 	public PhoneControl(String cucmAddr, String username, String password) {
-		System.out.println("phonepickup: " + new CiscoJtapiVersion());
+		System.out.println(this.getClass().getName() + " "
+				+ new CiscoJtapiVersion());
 		try {
 			System.out.println("Initializing Jtapi");
 
@@ -235,13 +239,13 @@ public class PhoneControl implements CiscoProviderObserver {
 										.equalsIgnoreCase(deviceName)) {
 									int state = ((CiscoTerminalConnection) termConList[k])
 											.getCallControlState();
-									System.err
+									System.out
 											.println("Connection "
 													+ ((CiscoTerminalConnection) termConList[k])
 															.toString()
 													+ " is in state " + state);
 									if (state == CiscoTerminalConnection.TALKING) {
-										System.err
+										System.out
 												.println("Found TALKING call "
 														+ ((CiscoTerminalConnection) termConList[k])
 																.toString()
@@ -274,6 +278,124 @@ public class PhoneControl implements CiscoProviderObserver {
 			e.printStackTrace();
 		}
 		return activeCall;
+	}
+
+	public CallerInfo findCallerName(String callingPartyNumber,
+			String calledPartyNumber, String originalCalledPartyNumber) {
+		CiscoCall callDetails = this.findCall(callingPartyNumber,
+				calledPartyNumber, originalCalledPartyNumber);
+		if (callDetails != null) {
+			CallerInfo result = new CallerInfo(callDetails
+					.getCurrentCallingPartyInfo().getDisplayName(),
+					callDetails.getCurrentCallingPartyUnicodeDisplayName());
+			System.out.println("Caller name: " + result.displayName
+					+ ", unicode: " + result.displayNameUnicode);
+			return result;
+		} else {
+			System.out.println("Caller name unknown.");
+			return new CallerInfo("Neznamy", "Neznámý");
+		}
+	}
+	
+	public CallerInfo getCallerName(String callId) {
+		CiscoCall callDetails = this.getCall(callId);
+		if (callDetails != null) {
+			CallerInfo result = new CallerInfo(callDetails
+					.getCurrentCallingPartyInfo().getDisplayName(),
+					callDetails.getCurrentCallingPartyUnicodeDisplayName());
+			System.out.println("Caller name: " + result.displayName
+					+ ", unicode: " + result.displayNameUnicode);
+			return result;
+		} else {
+			System.out.println("Caller name unknown.");
+			return new CallerInfo("Neznamy", "Neznámý");
+		}
+	}
+
+	public CiscoCall findCall(String callingPartyNumber,
+			String calledPartyNumber, String originalCalledPartyNumber) {
+		CiscoCall foundCall = null;
+
+		// get list of active calls on provider, iterate through to find the
+// match
+		System.out.println("Searching for calling: " + callingPartyNumber
+				+ ", called: " + calledPartyNumber + ", orig. called: "
+				+ originalCalledPartyNumber);
+		try {
+			Call[] callList = this.provider.getCalls();
+			if (callList != null) {
+				System.out.println("Found " + callList.length + " call(s).");
+				for (int i = 0; i < callList.length; i++) {
+					CiscoPartyInfo callingParty = ((CiscoCall) callList[i])
+							.getCurrentCallingPartyInfo();
+					CiscoPartyInfo calledParty = ((CiscoCall) callList[i])
+							.getCurrentCalledPartyInfo();
+					CiscoPartyInfo originalCalledParty = ((CiscoCall) callList[i])
+							.getCalledPartyInfo();
+					System.out.println("Checking call id: "
+							+ ((CiscoCall) callList[i]).getCallID().toString()
+							+ ", calling: "
+							+ callingParty.getAddress().getName()
+							+ ", called: " + calledParty.getAddress().getName()
+							+ ", orig. called: "
+							+ originalCalledParty.getAddress().getName());
+					if (callingParty.getAddress().getName()
+							.equals(callingPartyNumber)) {
+						System.out
+								.println("Calling party "
+										+ callingPartyNumber
+										+ " found. Checking original called party info.");
+						if (originalCalledParty.getAddress().getName()
+								.equals(originalCalledPartyNumber)) {
+							System.out.println("Original called party "
+									+ originalCalledPartyNumber
+									+ " OK. Checks completed, call "
+									+ ((CiscoCall) callList[i]).getCallID()
+											.toString()
+									+ " found, connected on CTI Port: "
+									+ calledParty.getAddress().getName());
+							foundCall = (CiscoCall) callList[i];
+							break;
+						} else {
+							System.out.println("Original called party "
+									+ originalCalledPartyNumber
+									+ " doesn't match "
+									+ originalCalledPartyNumber);
+						}
+					}
+				}
+			} else {
+				System.out.println("No active calls found on provider.");
+			}
+		} catch (ResourceUnavailableException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+
+		return foundCall;
+	}
+
+	public CiscoCall getCall(String callId) {
+		CiscoCall foundCall = null;
+		try {
+			Call[] callList = this.provider.getCalls();
+			if (callList != null) {
+				for (int i = 0; i < callList.length; i++) {
+					System.out.println("Checking call: "
+							+ ((CiscoCall) callList[i]).getCallID().toString());
+					if (((CiscoCall) callList[i]).getCallID().toString()
+							.equals(callId)) {
+						foundCall = (CiscoCall) callList[i];
+						System.out.println("Call: " + callId + " found");
+						break;
+					}
+				}
+			}
+		} catch (ResourceUnavailableException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		return foundCall;
 	}
 
 // transfer() an active call on the device to a number
@@ -336,7 +458,8 @@ public class PhoneControl implements CiscoProviderObserver {
  * ;
  * p.sendDataToAddress("1101", xml);
  */
-		p.transfer("SEPBCC49351BBC4", "1103");
+// p.transfer("SEPBCC49351BBC4", "1103");
+		p.findCallerName("1100", "888816220", "888816220");
 		p.shutdown();
 		System.exit(0);
 	}
